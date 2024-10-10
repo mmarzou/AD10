@@ -1,0 +1,128 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+Vagrant.configure("2") do |config|
+    # Use Docker as the provider
+    config.vm.provider "docker"
+  
+    # Bastion Host
+    config.vm.define "bastion" do |bastion|
+      bastion.vm.provider "docker" do |d|
+        d.name = "bastion"
+        d.image = "rastasheep/ubuntu-sshd:18.04"
+        d.has_ssh = true
+        d.remains_running = true
+        d.volumes = ["./ssh_keys/authorized_keys:/root/.ssh/authorized_keys:ro"]
+        d.ports = ["2222:22"]
+      end
+    end
+  
+    # Load Balancer (HAProxy)
+    config.vm.define "loadbalancer" do |lb|
+      lb.vm.provider "docker" do |d|
+        d.name = "loadbalancer"
+        d.image = "haproxy:latest"
+        d.remains_running = true
+        d.volumes = ["./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro"]
+        d.links = ["web1:web1", "web2:web2"]
+        d.ports = ["80:80"]
+      end
+    end
+  
+    # Web Servers
+    ["web1", "web2"].each do |web|
+      config.vm.define web do |web_config|
+        web_config.vm.provider "docker" do |d|
+          d.name = web
+          d.image = "wordpress:latest"
+          d.remains_running = true
+          d.env = {
+            "WORDPRESS_DB_HOST" => "db_master",
+            "WORDPRESS_DB_USER" => "wpuser",
+            "WORDPRESS_DB_PASSWORD" => "wppassword",
+            "WORDPRESS_DB_NAME" => "wordpress"
+          }
+          d.links = ["db_master:db_master"]
+        end
+      end
+    end
+  
+    # MariaDB Master
+    config.vm.define "db_master" do |db|
+      db.vm.provider "docker" do |d|
+        d.name = "db_master"
+        d.image = "mariadb:latest"
+        d.remains_running = true
+        d.env = {
+          "MYSQL_ROOT_PASSWORD" => "rootpassword",
+          "MYSQL_DATABASE" => "wordpress",
+          "MYSQL_USER" => "wpuser",
+          "MYSQL_PASSWORD" => "wppassword"
+        }
+        d.volumes = ["db_master_data:/var/lib/mysql"]
+      end
+    end
+  
+    # MariaDB Slave
+    config.vm.define "db_slave" do |db|
+      db.vm.provider "docker" do |d|
+        d.name = "db_slave"
+        d.image = "mariadb:latest"
+        d.remains_running = true
+        d.env = {
+          "MYSQL_ROOT_PASSWORD" => "rootpassword"
+        }
+        d.volumes = ["db_slave_data:/var/lib/mysql"]
+        d.links = ["db_master:db_master"]
+      end
+    end
+  
+    # Graylog
+    config.vm.define "graylog" do |graylog|
+      graylog.vm.provider "docker" do |d|
+        d.name = "graylog"
+        d.image = "graylog/graylog:4.3"
+        d.remains_running = true
+        d.env = {
+          "GRAYLOG_PASSWORD_SECRET" => "somepasswordpepper",
+          "GRAYLOG_ROOT_PASSWORD_SHA2" => "e3afed0047b08059d0fada10f400c1e5b16239b2",
+          "GRAYLOG_HTTP_EXTERNAL_URI" => "http://127.0.0.1:9000/"
+        }
+        d.links = ["mongo:mongo", "elasticsearch:elasticsearch"]
+        d.ports = ["9000:9000"]
+      end
+    end
+  
+    # MongoDB for Graylog
+    config.vm.define "mongo" do |mongo|
+      mongo.vm.provider "docker" do |d|
+        d.name = "mongo"
+        d.image = "mongo:4.2"
+        d.remains_running = true
+      end
+    end
+  
+    # Elasticsearch for Graylog
+    config.vm.define "elasticsearch" do |es|
+      es.vm.provider "docker" do |d|
+        d.name = "elasticsearch"
+        d.image = "docker.elastic.co/elasticsearch/elasticsearch:7.17.5"
+        d.remains_running = true
+        d.env = {
+          "discovery.type" => "single-node",
+          "xpack.security.enabled" => "false"
+        }
+      end
+    end
+  
+    # Shinken
+    config.vm.define "shinken" do |shinken|
+      shinken.vm.provider "docker" do |d|
+        d.name = "shinken"
+        d.image = "naparuba/shinken"
+        d.remains_running = true
+        d.ports = ["7767:7767"]
+      end
+    end
+  end
+  
